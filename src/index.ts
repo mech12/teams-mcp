@@ -18,9 +18,11 @@ import { registerSearchTools } from "./tools/search.js";
 import { registerTeamsTools } from "./tools/teams.js";
 import { registerUsersTools } from "./tools/users.js";
 
-// Microsoft Graph CLI app ID (default public client)
-const CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
-const AUTHORITY = "https://login.microsoftonline.com/common";
+// Microsoft Graph CLI app ID (default public client), overridable via env
+const CLIENT_ID = process.env.TEAMS_MCP_CLIENT_ID ?? "14d82eec-204b-4c2f-b7e8-296a70dab67e";
+const AUTHORITY = process.env.TEAMS_MCP_TENANT_ID
+  ? `https://login.microsoftonline.com/${process.env.TEAMS_MCP_TENANT_ID}`
+  : "https://login.microsoftonline.com/common";
 
 const AUTH_INFO_PATH = join(homedir(), ".msgraph-mcp-auth.json");
 
