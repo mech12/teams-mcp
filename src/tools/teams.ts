@@ -903,6 +903,12 @@ export function registerTeamsTools(
       teamId: z.string().describe("Team ID"),
       channelId: z.string().describe("Channel ID"),
       messageId: z.string().describe("Message ID containing the hosted content"),
+      replyId: z
+        .string()
+        .optional()
+        .describe(
+          "Optional reply ID. If the hosted content is embedded in a reply (thread message), pass the parent message ID as messageId and the reply's ID here. Required to download images attached to replies."
+        ),
       hostedContentId: z
         .string()
         .optional()
@@ -916,14 +922,17 @@ export function registerTeamsTools(
           "Optional file path to save the content. Supports UNC paths (e.g., \\\\wsl.localhost\\Ubuntu\\tmp\\file.png)."
         ),
     },
-    async ({ teamId, channelId, messageId, hostedContentId, savePath }) => {
+    async ({ teamId, channelId, messageId, replyId, hostedContentId, savePath }) => {
       try {
         const client = await graphService.getClient();
 
+        // Base path resolves to the reply when replyId is provided, otherwise the top-level message.
+        const messageBasePath = replyId
+          ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}`
+          : `/teams/${teamId}/channels/${channelId}/messages/${messageId}`;
+
         // First, get the message to find hosted content references
-        const message = (await client
-          .api(`/teams/${teamId}/channels/${channelId}/messages/${messageId}`)
-          .get()) as ChatMessage;
+        const message = (await client.api(messageBasePath).get()) as ChatMessage;
 
         if (!message) {
           return {
@@ -937,15 +946,17 @@ export function registerTeamsTools(
           };
         }
 
-        // Extract hosted content IDs from the message body
+        // Extract hosted content IDs from the message body.
+        // Use the base64 id from the src URL (.../hostedContents/{id}/$value) — that is what
+        // Graph accepts. The short itemid="0-skr-..." attribute is a client-side id and 404s.
         const bodyContent = message.body?.content || "";
-        const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
+        const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value/gi;
         const matches: string[] = [];
         let match: RegExpExecArray | null;
 
         // biome-ignore lint/suspicious/noAssignInExpressions: needed for regex extraction
         while ((match = hostedContentRegex.exec(bodyContent)) !== null) {
-          const contentId = match[1] || match[2];
+          const contentId = match[1];
           if (contentId && !matches.includes(contentId)) {
             matches.push(contentId);
           }
@@ -980,9 +991,7 @@ export function registerTeamsTools(
           try {
             // Get the hosted content binary data
             const response = await client
-              .api(
-                `/teams/${teamId}/channels/${channelId}/messages/${messageId}/hostedContents/${contentId}/$value`
-              )
+              .api(`${messageBasePath}/hostedContents/${contentId}/$value`)
               .responseType("arraybuffer" as any)
               .get();
 
@@ -1084,6 +1093,7 @@ export function registerTeamsTools(
                 {
                   summary,
                   messageId,
+                  ...(replyId ? { replyId } : {}),
                   totalContentItems: contentIds.length,
                   successCount,
                   errorCount,
